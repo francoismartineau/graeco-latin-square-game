@@ -13,8 +13,8 @@ def solve_grid(grid):
                     if len(unsolved_associations) == 1:
                         grid.set_char(row, column, next(iter(unsolved_associations)), True)
                     if not grid.is_taken(row, column, char) and not grid.char_in_column(char, column):
-                        candidate_value = grid.get_new_cell_value(row, column, char)
-                        if not grid.is_already_solved(candidate_value):
+                        candidate_value = Grid.Value.from_cell(grid.get_cell(row, column), char)
+                        if not grid.is_solved_value(candidate_value):
                             candidate_cells.add(column)
                         if len(candidate_cells) > 1:
                             break
