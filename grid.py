@@ -21,6 +21,7 @@ class Grid:
         self.solved_count = 0
         self.solved_values = Grid.SolvedValues()
         self.__scan_solved_cells()
+        self.cells_per_char = self.__init_cells_per_char(self.cells)
 
     # TODO: decorator to validate grid
     #   5 * 5
@@ -41,11 +42,11 @@ class Grid:
     @staticmethod
     def init_cells(matrix):
         cells = []
-        for row in matrix:
-            for cell in row:
+        for row_index, row in enumerate(matrix):
+            for column_index, cell in enumerate(row):
                 letter = cell[0] if cell[0] in "ABCDE" else None
                 digit = cell[1] if cell[1] in "12345" else None
-                cells.append(Grid.Cell(letter, digit))
+                cells.append(Grid.Cell(letter, digit, row_index, column_index))
         return cells
 
     def __scan_solved_cells(self):
@@ -53,10 +54,28 @@ class Grid:
             if cell.is_solved():
                 self.__save_solved_value(cell)
 
-    class Cell:
+    @staticmethod
+    def __init_cells_per_char(cells):
+        cells_per_char = {}
+        for char in "ABCDE12345":
+            cells_per_char[char] = []
+        for cell in cells:
+            if cell.letter is not None:
+                cells_per_char[cell.letter].append(cell)
+            if cell.digit is not None:
+                cells_per_char[cell.digit].append(cell)
+        return cells_per_char
+
+    class Value:
         def __init__(self, letter, digit):
             self.letter = letter
             self.digit = digit
+
+        @classmethod
+        def from_value(cls, value: Grid.Value, char):
+            letter = char if char.isalpha() else value.letter
+            digit = char if not char.isalpha() else value.digit
+            return cls(letter, digit)
 
         def is_solved(self):
             return self.letter is not None and self.digit is not None
@@ -76,12 +95,20 @@ class Grid:
             return (self.letter if self.letter is not None else " ") \
                 + (self.digit if self.digit is not None else " ")
 
-    class Value(Cell):
-        @classmethod
-        def from_cell(cls, cell, char):
-            letter = char if char.isalpha() else cell.letter
-            digit = char if not char.isalpha() else cell.digit
-            return cls(letter, digit)
+    class Cell(Value):
+        def __init__(self, letter, digit, row, column):
+            super().__init__(letter, digit)
+            self.row = row
+            self.column = column
+
+        def __str__(self):
+            return self.to_str(True)
+
+        def to_str(self, coordinates: bool) -> str:
+            return super().__str__() + (f" ({self.row}, {self.column})" if coordinates else "")
+
+    def get_cells(self, char: str) -> Grid.Cell:
+        return self.cells_per_char[char]
 
     def get_row(self, index):
         return self.cells[index * GRID_SIZE: (index + 1) * GRID_SIZE]
@@ -105,17 +132,20 @@ class Grid:
     def set_char(self, row, column, char, display=False):
         self.__validate_char(char)
         self.__validate_is_not_occupied(row, column, char)
-        if self.solution_cells is not None:
-            self.__validate_move(row, column, char)
 
         cell = self.get_cell(row, column)
         cell.set_char(char)
+
+        if self.solution_cells is not None:
+            self.__validate_move(row, column, char)
+
+        self.cells_per_char[char].append(cell)
         if cell.is_solved():
             self.__save_solved_value(cell)
         self.move_count += 1
         if display:
+            print(f"-- Move {self.move_count} ----")
             self.display(row, column, char)
-            print(self.move_count, "moves")
 
     @staticmethod
     def __validate_char(char):
@@ -144,8 +174,9 @@ class Grid:
         else:
             expected_char = solution_cell.digit
         if char != expected_char:
+            self.display(row, column, char, error=True)
             raise ValueError(
-                f"Wrong value inserted [y='{row}', x='{column}', insert='{char}', expected='{expected_char}']"
+                f"Wrong value inserted [y='{row}', x='{column}', insert='{char}', expected='{solution_cell}']"
             )
 
     def __get_solution_cell(self, row, column):
@@ -167,20 +198,22 @@ class Grid:
             return cell.letter is not None
         return cell.digit is not None
 
-    def display(self, accent_row=None, accent_column=None, accent_char=None):
+    def display(self, accent_row=None, accent_column=None, accent_char=None, error=False):
         def row_separator():
             print(GRID_SIZE * "----" + (GRID_SIZE + 1) * "-")
 
+        color = colorama.Fore.GREEN if not error else colorama.Fore.RED
+
         def print_accent(s, y, x, char, end="\n"):
             if y == accent_row and x == accent_column:
-                s = s.replace(char, colorama.Fore.GREEN + char + colorama.Style.RESET_ALL)
+                s = s.replace(char, color + char + colorama.Style.RESET_ALL)
             print(s, end=end)
 
         row_separator()
         for y in range(GRID_SIZE):
             print("|", end="")
             for x in range(GRID_SIZE):
-                print_accent(f" {str(self.get_cell(y, x))} |", y, x, accent_char, end="")
+                print_accent(f" {self.get_cell(y, x).to_str(False)} |", y, x, accent_char, end="")
             print()
             row_separator()
 
@@ -189,6 +222,9 @@ class Grid:
         char = str(cell).strip()
         if len(char) != 1:
             return set()
+        return self.solved_values.get_unsolved_associations(char)
+
+    def get_unsolved_complementary_chars(self, char):
         return self.solved_values.get_unsolved_associations(char)
 
     def is_solved(self):
