@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import csv
+import math
+import re
 from pathlib import Path
 
 import colorama
+
+import util
 
 colorama.init(autoreset=True)
 GRIDS_PATH = Path(__file__).resolve().parent / "grids"
 GRID_SIZE = 5
 VALID_CHARS = "ABCDE12345 "
+CELL_REGEX = r"^([A-Z]*)([0-9]*)$"
 
 
 class Grid:
@@ -17,47 +22,97 @@ class Grid:
         self.cells = self.load_file(file_name)
         if load_solution:
             self.solution_cells = self.load_file(file_name.replace(".csv", "_solution.csv"))
+        grid_size = int(math.sqrt(len(self.cells)))
+        self.valid_letters, self.valid_digits = self.__init_valid_chars(grid_size=grid_size)
+        self.valid_chars = self.valid_letters + self.valid_digits
         self.move_count = 0
         self.solved_count = 0
-        self.solved_values = Grid.SolvedValues()
+        self.solved_values = Grid.SolvedValues(self.valid_letters, self.valid_digits)
+        # TODO: conversion vers Cell qui supportent plusieurs lettres et chiffres
+        #   Rendu à SolvedCells (Renommer pour solvedCellsGrid ?)
         self.__scan_solved_cells()
         self.cells_per_char = self.__init_cells_per_char(self.cells)
 
-    # TODO: decorator to validate grid
-    #   5 * 5
-    #   2 chars per cell
-    #   supported chars:
-    #       1st pos: ABCDE_
-    #       2nd pos: 12345_
     @classmethod
     def load_file(cls, grid_file_name):
         grid_path = GRIDS_PATH / grid_file_name
         try:
             with open(grid_path, newline="", encoding="utf-8") as f:
                 rows = list(csv.reader(f))
+                cls.validate_grid(grid=rows)
                 return cls.init_cells(rows)
         except FileNotFoundError:
             raise SystemExit(f"Error: grid_id '{grid_path}' doesn't exist.")
 
-    @staticmethod
-    def init_cells(matrix):
+    @classmethod
+    def validate_grid(cls, grid):
+        row_count = len(grid)
+        if row_count in [0, 2, 6]:
+            raise ValueError(f"Invalid grid dimension [size='{row_count}']")
+
+        for row_index, row in enumerate(grid):
+            column_count = len(row)
+            if column_count != row_count:
+                raise ValueError(
+                    f"Inconsistent grid dimensions [row_count='{row_count}', column_count for row {row_index}='{column_count}']")
+            for column_index, cell_value in enumerate(row):
+                cls.validate_cell_value(cell_value, grid_size=row_count)
+
+    @classmethod
+    def validate_cell_value(cls, cell_value, grid_size):
+        value = cls.parse_value(cell_value)
+        if value.letter:
+            letter_decimal = util.alphabet_to_decimal(value.letter)
+            if letter_decimal > grid_size or letter_decimal < 1:
+                raise ValueError(
+                    f"Letter value out of bounds [letter='{value.letter}', decimal_value='{letter_decimal}', grid_size={grid_size}]")
+        if value.digit:
+            digit_int = int(value.digit)
+            if digit_int > grid_size or digit_int < 1:
+                raise ValueError(
+                    f"Digit value out of bounds [digit='{value.digit}', grid_size={grid_size}]")
+
+    @classmethod
+    def init_cells(cls, matrix):
         cells = []
         for row_index, row in enumerate(matrix):
-            for column_index, cell in enumerate(row):
-                letter = cell[0] if cell[0] in "ABCDE" else None
-                digit = cell[1] if cell[1] in "12345" else None
-                cells.append(Grid.Cell(letter, digit, row_index, column_index))
+            for column_index, cell_value in enumerate(row):
+                value = cls.parse_value(cell_value)
+                cell = value.to_cell(row_index, column_index)
+                cells.append(cell)
         return cells
+
+    @staticmethod
+    def parse_value(cell_value) -> Grid.Value:
+        match = re.search(CELL_REGEX, cell_value)
+        if not match:
+            raise ValueError(
+                f"Invalid cell value. A cell must contain optional capital letters followed by optional digits [cell_value='{cell_value}']")
+        groups = match.groups()
+        return Grid.Value(
+            letter=groups[0] or None,
+            digit=groups[1] or None
+        )
+
+    @staticmethod
+    def __init_valid_chars(grid_size):
+        valid_letters = []
+        valid_digits = []
+        for i in range(1, grid_size + 1):
+            valid_digits.append(str(i))
+            letter = util.decimal_to_alphabet(i)
+            valid_letters.append(letter)
+        return valid_letters, valid_digits
 
     def __scan_solved_cells(self):
         for cell in self.cells:
             if cell.is_solved():
                 self.__save_solved_value(cell)
 
-    @staticmethod
-    def __init_cells_per_char(cells):
+    # FIXME: toutes les loops de chars devraient utiliser la taille de la grid
+    def __init_cells_per_char(self, cells):
         cells_per_char = {}
-        for char in "ABCDE12345":
+        for char in self.valid_chars:
             cells_per_char[char] = []
         for cell in cells:
             if cell.letter is not None:
@@ -69,13 +124,16 @@ class Grid:
     class Value:
         def __init__(self, letter, digit):
             self.letter = letter
-            self.digit = digit
+            self.digit = digit if digit is not None else None
 
         @classmethod
         def from_value(cls, value: Grid.Value, char):
             letter = char if char.isalpha() else value.letter
             digit = char if not char.isalpha() else value.digit
             return cls(letter, digit)
+
+        def to_cell(self, row_index, column_index):
+            return Grid.Cell(self.letter, self.digit, row_index, column_index)
 
         def is_solved(self):
             return self.letter is not None and self.digit is not None
@@ -92,8 +150,7 @@ class Grid:
             return char == self.digit
 
         def __str__(self):
-            return (self.letter if self.letter is not None else " ") \
-                + (self.digit if self.digit is not None else " ")
+            return f"{self.letter if self.letter is not None else ' '}{self.digit if self.digit is not None else ' '}"
 
     class Cell(Value):
         def __init__(self, letter, digit, row, column):
@@ -147,9 +204,8 @@ class Grid:
             print(f"-- Move {self.move_count} ----")
             self.display(row, column, char)
 
-    @staticmethod
-    def __validate_char(char):
-        if len(char) != 1 or char not in VALID_CHARS:
+    def __validate_char(self, char):
+        if len(char) != 1 or char not in self.valid_chars:
             raise ValueError(f"Invalid char [char: '{char}']")
 
     def __validate_is_not_occupied(self, row, column, char):
@@ -232,12 +288,12 @@ class Grid:
 
     class SolvedValues:
         # TODO: avoir des références à des cells
-        def __init__(self):
+        def __init__(self, valid_letters, valid_digits):
             self.letters = {}
-            for letter in "ABCDE":
+            for letter in valid_letters:
                 self.letters[letter] = []
             self.digits = {}
-            for digit in "12345":
+            for digit in valid_digits:
                 self.digits[digit] = []
 
         def __getitem__(self, char):
@@ -247,14 +303,14 @@ class Grid:
 
         def get_unsolved_associations(self, char):
             if char.isalpha():
-                return set(self.letters[char]) ^ set("12345")
-            return set(self.digits[char]) ^ set("ABCDE")
+                return set(self.letters[char]) ^ set(self.digits)
+            return set(self.digits[char]) ^ set(self.letters)
 
         def __str__(self):
             res = "Solved values:\n"
-            for letter in "ABCDE":
+            for letter in self.letters:
                 res += "| "
-                for digit in "12345":
+                for digit in self.digits:
                     if digit in self.letters[letter]:
                         res += letter + digit
                     else:
@@ -262,3 +318,7 @@ class Grid:
                     res += " | "
                 res += "\n"
             return res
+
+
+if __name__ == "__main__":
+    Grid.parse_value("")

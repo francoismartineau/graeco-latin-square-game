@@ -1,11 +1,11 @@
 from grid import Grid, GRID_SIZE
 
-DISPLAY_MOVES = False
+DISPLAY_MOVES = True
 
 
 def solve_grid(grid):
     while not grid.is_solved():
-        for char in "ABCDE12345":
+        for char in grid.valid_chars:
             complementary_chars = grid.get_unsolved_complementary_chars(char)
             cells_containing_char = grid.get_cells(char)
             if len(cells_containing_char) != GRID_SIZE:
@@ -24,7 +24,7 @@ def solve_grid(grid):
                     cell = next(iter(candidate_cells))
                     grid.set_char(cell.row, cell.column, complementary_char, DISPLAY_MOVES)
 
-        for char in "ABCDE12345":
+        for char in grid.valid_chars:
             for row in range(GRID_SIZE):
                 candidate_cells = set()
                 if grid.char_in_row(char, row):
@@ -46,6 +46,6 @@ def solve_grid(grid):
 
 
 if __name__ == "__main__":
-    grid = Grid(4, True)
+    grid = Grid(5, True)
     grid.display()
     solve_grid(grid)
